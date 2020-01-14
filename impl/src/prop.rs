@@ -1,5 +1,5 @@
 use crate::ast::{Enum, Field, Struct, Variant};
-use syn::{Member, Type};
+use syn::{GenericArgument, Member, PathArguments, Type};
 
 impl Struct<'_> {
     pub(crate) fn from_field(&self) -> Option<&Field> {
@@ -53,6 +53,13 @@ impl Variant<'_> {
 
     pub(crate) fn backtrace_field(&self) -> Option<&Field> {
         backtrace_field(&self.fields)
+    }
+
+    pub(crate) fn is_boxed(&self) -> Option<&Type> {
+        if self.fields.len() != 1 {
+            return None;
+        }
+        type_is_box(&self.fields[0].ty)
     }
 }
 
@@ -108,4 +115,22 @@ fn type_is_backtrace(ty: &Type) -> bool {
 
     let last = path.segments.last().unwrap();
     last.ident == "Backtrace" && last.arguments.is_empty()
+}
+
+fn type_is_box(ty: &Type) -> Option<&Type> {
+    let path = match ty {
+        Type::Path(ty) if ty.path.segments.len() == 1 => &ty.path,
+        _ => return None,
+    };
+
+    let last = path.segments.last().unwrap();
+    if last.ident == "Box" {
+        if let PathArguments::AngleBracketed(args) = &last.arguments {
+            if let GenericArgument::Type(ty) = &args.args.first().unwrap() {
+                return Some(ty);
+            }
+        }
+    }
+
+    None
 }

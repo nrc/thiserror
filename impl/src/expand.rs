@@ -124,7 +124,7 @@ fn impl_struct(input: Struct) -> TokenStream {
     let from_impl = input.from_field().map(|from_field| {
         let backtrace_field = input.backtrace_field();
         let from = from_field.ty;
-        let body = from_initializer(from_field, backtrace_field);
+        let body = from_initializer(from_field, backtrace_field, false);
         quote! {
             impl #impl_generics std::convert::From<#from> for #ty #ty_generics #where_clause {
                 fn from(source: #from) -> Self {
@@ -164,7 +164,7 @@ fn impl_enum(input: Enum) -> TokenStream {
                 } else {
                     None
                 };
-                let dyn_error = quote_spanned!(source.span()=> source #asref.as_dyn_error());
+                let dyn_error = quote_spanned!(source.span() => source #asref.as_dyn_error());
                 quote! {
                     #ty::#ident {#source: source, ..} => std::option::Option::Some(#dyn_error),
                 }
@@ -305,9 +305,19 @@ fn impl_enum(input: Enum) -> TokenStream {
     let from_impls = input.variants.iter().filter_map(|variant| {
         let from_field = variant.from_field()?;
         let backtrace_field = variant.backtrace_field();
+        let boxed = variant.is_boxed();
         let variant = &variant.ident;
         let from = from_field.ty;
-        let body = from_initializer(from_field, backtrace_field);
+        let from = if let Some(inner) = boxed {
+            quote! {
+                #inner
+            }
+        } else {
+            quote! {
+                #from
+            }
+        };
+        let body = from_initializer(from_field, backtrace_field, boxed.is_some());
         Some(quote! {
             impl #impl_generics std::convert::From<#from> for #ty #ty_generics #where_clause {
                 fn from(source: #from) -> Self {
@@ -342,7 +352,11 @@ fn fields_pat(fields: &[Field]) -> TokenStream {
     }
 }
 
-fn from_initializer(from_field: &Field, backtrace_field: Option<&Field>) -> TokenStream {
+fn from_initializer(
+    from_field: &Field,
+    backtrace_field: Option<&Field>,
+    boxed: bool,
+) -> TokenStream {
     let from_member = &from_field.member;
     let backtrace = backtrace_field.map(|backtrace_field| {
         let backtrace_member = &backtrace_field.member;
@@ -356,8 +370,17 @@ fn from_initializer(from_field: &Field, backtrace_field: Option<&Field>) -> Toke
             }
         }
     });
+    let source = if boxed {
+        quote! {
+            Box::new(source)
+        }
+    } else {
+        quote! {
+            source
+        }
+    };
     quote!({
-        #from_member: source,
+        #from_member: #source,
         #backtrace
     })
 }
