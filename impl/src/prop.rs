@@ -40,11 +40,19 @@ impl Enum<'_> {
                 .iter()
                 .all(|variant| variant.attrs.transparent.is_some())
     }
+
+    pub(crate) fn has_unwrap(&self) -> bool {
+        self.attrs.unwrap.is_some()
+    }
 }
 
 impl Variant<'_> {
     pub(crate) fn from_field(&self) -> Option<&Field> {
         from_field(&self.fields)
+    }
+
+    pub(crate) fn from_unwrap_field(&self) -> Option<&Field> {
+        from_unwrap_field(&self.fields)
     }
 
     pub(crate) fn source_field(&self) -> Option<&Field> {
@@ -72,6 +80,15 @@ impl Field<'_> {
 fn from_field<'a, 'b>(fields: &'a [Field<'b>]) -> Option<&'a Field<'b>> {
     for field in fields {
         if field.attrs.from.is_some() {
+            return Some(&field);
+        }
+    }
+    None
+}
+
+fn from_unwrap_field<'a, 'b>(fields: &'a [Field<'b>]) -> Option<&'a Field<'b>> {
+    for field in fields {
+        if field.attrs.from_unwrap.is_some() {
             return Some(&field);
         }
     }

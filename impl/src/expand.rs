@@ -54,7 +54,7 @@ fn impl_struct(input: Struct) -> TokenStream {
                     self.#source.as_ref().and_then(|source| source.as_dyn_error().backtrace())
                 }
             } else {
-                quote_spanned! {source.span()=>
+                quote_spanned! {source.span() =>
                     self.#source.as_dyn_error().backtrace()
                 }
             };
@@ -160,7 +160,7 @@ fn impl_enum(input: Enum) -> TokenStream {
             } else if let Some(source_field) = variant.source_field() {
                 let source = &source_field.member;
                 let asref = if type_is_option(source_field.ty) {
-                    Some(quote_spanned!(source.span()=> .as_ref()?))
+                    Some(quote_spanned!(source.span() => .as_ref()?))
                 } else {
                     None
                 };
@@ -303,29 +303,99 @@ fn impl_enum(input: Enum) -> TokenStream {
     };
 
     let from_impls = input.variants.iter().filter_map(|variant| {
-        let from_field = variant.from_field()?;
+        let (from_field, from_unwrap) = match variant.from_unwrap_field() {
+            Some(field) => (field, true),
+            None => (variant.from_field()?, false),
+        };
         let backtrace_field = variant.backtrace_field();
         let boxed = variant.is_boxed();
         let variant = &variant.ident;
-        let from = from_field.ty;
-        let from = if let Some(inner) = boxed {
-            quote! {
-                #inner
-            }
+        let from_ty = from_field.ty;
+        let from_ty = if let Some(inner) = boxed {
+            inner
         } else {
-            quote! {
-                #from
-            }
+            from_ty
         };
-        let body = from_initializer(from_field, backtrace_field, boxed.is_some());
+        if from_unwrap {
+            // TODO assumes type name == variant name
+            let from_trait = format_ident!("__From{}", variant);
+            let rewrap_trait = format_ident!("__RewrapFor{}", variant);
+            let (other_variants, other_variant_types): (Vec<&proc_macro2::Ident>, Vec<&Type>) = input.variants.iter().filter_map(|other| {
+                if &other.ident == variant || other.fields.len() != 1 {
+                    return None;
+                }
+
+                Some((&other.ident, &other.fields[0].ty))
+            }).unzip();
+
+            Some(quote! {
+                impl #from_trait {
+                    fn __other(e: #from_ty) -> Self {
+                        #ty::#variant(e)
+                    }
+                }
+
+                #(impl #rewrap_trait<#other_variant_types> for #ty {
+                    fn __rewrap(e: #other_variant_types) -> std::result::Result<Self, #other_variant_types> {
+                        std::result::Result::Ok(#ty::#other_variants(e))
+                    }
+                })*
+
+                impl #rewrap_trait<#ty> for #ty {
+                    fn __rewrap(e: Self) -> std::result::Result<Self, Self> {
+                        std::result::Result::Ok(self)
+                    }
+                }
+            })
+        } else {
+            let body = from_initializer(from_field, backtrace_field, boxed.is_some());
+            Some(quote! {
+                impl #impl_generics std::convert::From<#from_ty> for #ty #ty_generics #where_clause {
+                    fn from(source: #from_ty) -> Self {
+                        #ty::#variant #body
+                    }
+                }
+            })
+        }
+    });
+
+    let unwrap = if input.has_unwrap() {
+        let from_trait = format_ident!("__From{}", ty);
+        let rewrap_trait = format_ident!("__RewrapFor{}", ty);
+        let variants: &Vec<_> = &input.variants.iter().map(|v| &v.ident).collect();
+
         Some(quote! {
-            impl #impl_generics std::convert::From<#from> for #ty #ty_generics #where_clause {
-                fn from(source: #from) -> Self {
-                    #ty::#variant #body
+            trait #from_trait {
+                fn __other(e: #ty) -> Self;
+            }
+
+            impl<T: #from_trait> From<#ty> for T {
+                fn from(e: #ty) -> T {
+                    let e = match e {
+                        // TODO assumes variant name == type name
+                        #(#ty::#variants(e) => match #variants::__rewrap(e) {
+                            Ok(e) => return e,
+                            Err(e) => #ty::#variants(e),
+                        },)*
+                    };
+
+                    T::__other(e)
+                }
+            }
+
+            trait #rewrap_trait<T> {
+                fn __rewrap(e: T) -> std::result::Result<Self, T>;
+            }
+
+            impl<T, U> rewrap_trait<T> for U {
+                default fn __rewrap(e: T) -> ::std::result::Result<U, T> {
+                    std::result::Result::Err(e)
                 }
             }
         })
-    });
+    } else {
+        None
+    };
 
     quote! {
         impl #impl_generics std::error::Error for #ty #ty_generics #where_clause {
@@ -334,6 +404,7 @@ fn impl_enum(input: Enum) -> TokenStream {
         }
         #display_impl
         #(#from_impls)*
+        #unwrap
     }
 }
 
