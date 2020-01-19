@@ -157,6 +157,8 @@
 //!
 //!   [`anyhow`]: https://github.com/dtolnay/anyhow
 
+#![feature(specialization)]
+
 mod aserror;
 mod display;
 
@@ -167,4 +169,19 @@ pub use thiserror_impl::*;
 pub mod private {
     pub use crate::aserror::AsDynError;
     pub use crate::display::{DisplayAsDisplay, PathAsDisplay};
+
+    // TODO name, move and export
+    pub trait __From<T> {
+        fn __other(e: T) -> Self;
+    }
+
+    pub trait __Rewrap<T>: Sized {
+        fn __rewrap(e: T) -> std::result::Result<Self, T>;
+    }
+
+    impl<T, U> __Rewrap<T> for U {
+        default fn __rewrap(e: T) -> std::result::Result<U, T> {
+            std::result::Result::Err(e)
+        }
+    }
 }

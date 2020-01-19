@@ -1,4 +1,4 @@
-use crate::ast::{Enum, Field, Input, Struct};
+use crate::ast::{Enum, Field, Input, Struct, Variant};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, quote_spanned, ToTokens};
 use syn::spanned::Spanned;
@@ -317,33 +317,36 @@ fn impl_enum(input: Enum) -> TokenStream {
             from_ty
         };
         if from_unwrap {
-            // TODO assumes type name == variant name
-            let from_trait = format_ident!("__From{}", variant);
-            let rewrap_trait = format_ident!("__RewrapFor{}", variant);
             let (other_variants, other_variant_types): (Vec<&proc_macro2::Ident>, Vec<&Type>) = input.variants.iter().filter_map(|other| {
-                if &other.ident == variant || other.fields.len() != 1 {
+                if &other.ident == variant {
                     return None;
                 }
 
-                Some((&other.ident, &other.fields[0].ty))
+                other.name_and_type()
             }).unzip();
 
             Some(quote! {
-                impl #from_trait {
+                impl thiserror::private::__From<#from_ty> for #ty {
                     fn __other(e: #from_ty) -> Self {
                         #ty::#variant(e)
                     }
                 }
 
-                #(impl #rewrap_trait<#other_variant_types> for #ty {
+                impl From<#from_ty> for #ty {
+                    fn from(e: #from_ty) -> Self {
+                        e.__into_unwrapped()
+                    }
+                }
+
+                #(impl thiserror::private::__Rewrap<#other_variant_types> for #ty {
                     fn __rewrap(e: #other_variant_types) -> std::result::Result<Self, #other_variant_types> {
                         std::result::Result::Ok(#ty::#other_variants(e))
                     }
                 })*
 
-                impl #rewrap_trait<#ty> for #ty {
+                impl thiserror::private::__Rewrap<#ty> for #ty {
                     fn __rewrap(e: Self) -> std::result::Result<Self, Self> {
-                        std::result::Result::Ok(self)
+                        std::result::Result::Ok(e)
                     }
                 }
             })
@@ -360,36 +363,24 @@ fn impl_enum(input: Enum) -> TokenStream {
     });
 
     let unwrap = if input.has_unwrap() {
-        let from_trait = format_ident!("__From{}", ty);
-        let rewrap_trait = format_ident!("__RewrapFor{}", ty);
-        let variants: &Vec<_> = &input.variants.iter().map(|v| &v.ident).collect();
+        let (variants, variant_tys): (Vec<_>, Vec<_>) = input
+            .variants
+            .iter()
+            .filter_map(Variant::name_and_type)
+            .unzip();
 
         Some(quote! {
-            trait #from_trait {
-                fn __other(e: #ty) -> Self;
-            }
-
-            impl<T: #from_trait> From<#ty> for T {
-                fn from(e: #ty) -> T {
-                    let e = match e {
-                        // TODO assumes variant name == type name
-                        #(#ty::#variants(e) => match #variants::__rewrap(e) {
+            impl #ty {
+                pub fn __into_unwrapped<T: thiserror::private::__From<#ty>>(self) -> T {
+                    let e = match self {
+                        #(#ty::#variants(e) => match <T as thiserror::private::__Rewrap<#variant_tys>>::__rewrap(e) {
                             Ok(e) => return e,
                             Err(e) => #ty::#variants(e),
                         },)*
+                        e => e,
                     };
 
                     T::__other(e)
-                }
-            }
-
-            trait #rewrap_trait<T> {
-                fn __rewrap(e: T) -> std::result::Result<Self, T>;
-            }
-
-            impl<T, U> rewrap_trait<T> for U {
-                default fn __rewrap(e: T) -> ::std::result::Result<U, T> {
-                    std::result::Result::Err(e)
                 }
             }
         })

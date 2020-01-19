@@ -10,7 +10,6 @@ use syn::{
 pub struct Attrs<'a> {
     pub display: Option<Display<'a>>,
     pub source: Option<&'a Attribute>,
-    pub source_unwrap: Option<&'a Attribute>,
     pub backtrace: Option<&'a Attribute>,
     pub from: Option<&'a Attribute>,
     pub from_unwrap: Option<&'a Attribute>,
@@ -30,7 +29,6 @@ pub fn get(input: &[Attribute]) -> Result<Attrs> {
     let mut attrs = Attrs {
         display: None,
         source: None,
-        source_unwrap: None,
         backtrace: None,
         from: None,
         from_unwrap: None,
@@ -43,16 +41,10 @@ pub fn get(input: &[Attribute]) -> Result<Attrs> {
             parse_error_attribute(&mut attrs, attr)?;
         } else if attr.path.is_ident("source") {
             require_empty_attribute(attr)?;
-            if attrs.source.is_some() || attrs.source_unwrap.is_some() {
+            if attrs.source.is_some() {
                 return Err(Error::new_spanned(attr, "duplicate #[source] attribute"));
             }
             attrs.source = Some(attr);
-        } else if attr.path.is_ident("source_unwrap") {
-            require_empty_attribute(attr)?;
-            if attrs.source.is_some() || attrs.source_unwrap.is_some() {
-                return Err(Error::new_spanned(attr, "duplicate #[source] attribute"));
-            }
-            attrs.source_unwrap = Some(attr);
         } else if attr.path.is_ident("backtrace") {
             require_empty_attribute(attr)?;
             if attrs.backtrace.is_some() {

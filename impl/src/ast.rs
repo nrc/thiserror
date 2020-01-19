@@ -103,6 +103,14 @@ impl<'a> Variant<'a> {
             fields: Field::multiple_from_syn(&node.fields)?,
         })
     }
+
+    pub fn name_and_type(&self) -> Option<(&Ident, &Type)> {
+        if self.fields.len() != 1 {
+            return None;
+        }
+
+        Some((&self.ident, &self.fields[0].ty))
+    }
 }
 
 impl<'a> Field<'a> {

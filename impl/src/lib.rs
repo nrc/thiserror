@@ -12,10 +12,7 @@ mod valid;
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput};
 
-#[proc_macro_derive(
-    Error,
-    attributes(backtrace, error, from, from_unwrap, source, source_unwrap, unwrap)
-)]
+#[proc_macro_derive(Error, attributes(backtrace, error, from, from_unwrap, source, unwrap))]
 pub fn derive_error(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     expand::derive(&input)
